@@ -292,7 +292,7 @@ const GameCanvas: React.FC = () => {
     };
     const handlePointerDown = (e: PointerEvent) => {
         const target = e.target as HTMLElement;
-        if (target.tagName !== 'BUTTON') {
+        if (target.tagName !== 'BUTTON' && target.tagName !== 'A') {
              e.preventDefault();
              jump();
         }
@@ -348,6 +348,9 @@ const GameCanvas: React.FC = () => {
               <div>
                 <h1 className="text-4xl font-black text-slate-800 mb-2 tracking-tight">FLAPPY WEED</h1>
                 <p className="text-slate-500">Tap, Click, or Space to fly high</p>
+                <p className="text-slate-400 text-sm mt-3 font-medium">
+                  Developer: <a href="https://t.me/Its_Gods" target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:text-blue-600 transition-colors">@Its_Gods</a>
+                </p>
               </div>
               
               <button 
