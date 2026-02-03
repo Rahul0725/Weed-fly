@@ -15,7 +15,7 @@ export enum GameState {
 }
 
 // Custom Bird Image URL
-export const BIRD_IMAGE_URL = 'https://i.postimg.cc/3rVkV17b/c73724cd89f40fceed434287e55ce6a3.jpg';
+export const BIRD_IMAGE_URL = 'https://i.postimg.cc/mrdfyrN7/IMG-20260203-205819.jpg';
 
 // Custom Pillar Image URL
 export const PIPE_IMAGE_URL = 'https://i.postimg.cc/jSFd96pH/IMG-20260203-150942.jpg';
