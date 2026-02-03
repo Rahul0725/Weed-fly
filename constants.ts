@@ -22,3 +22,6 @@ export const PIPE_IMAGE_URL = 'https://i.postimg.cc/jSFd96pH/IMG-20260203-150942
 
 // Background Music URL
 export const BACKGROUND_MUSIC_URL = 'https://collection.cloudinary.com/dwlquotvw/6a15e083ddef2b94042e60de676b199b';
+
+// Game Over Sound URL
+export const GAME_OVER_SOUND_URL = 'https://github.com/Rahul0725/Sound-effects-gg/raw/refs/heads/main/92116289-98e0-4dea-babc-e6f7f8bd08d9.mp3';

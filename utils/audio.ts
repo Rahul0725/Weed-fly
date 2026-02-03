@@ -1,6 +1,9 @@
+import { GAME_OVER_SOUND_URL } from '../constants';
+
 class AudioController {
   private ctx: AudioContext | null = null;
   private bgMusic: HTMLAudioElement | null = null;
+  private crashSound: HTMLAudioElement | null = null;
 
   private getContext(): AudioContext {
     if (!this.ctx) {
@@ -99,27 +102,21 @@ class AudioController {
 
   public playCrash() {
     try {
-      const ctx = this.getContext();
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-
-      // "Hit" sound (descending saw)
-      osc.type = 'sawtooth';
-      const now = ctx.currentTime;
+      if (!this.crashSound) {
+        this.crashSound = new Audio(GAME_OVER_SOUND_URL);
+        // Pre-load logic not strictly needed for Audio element but good to have instance
+        this.crashSound.volume = 0.6;
+      }
       
-      osc.frequency.setValueAtTime(300, now);
-      osc.frequency.exponentialRampToValueAtTime(50, now + 0.3);
-
-      gain.gain.setValueAtTime(0.2, now);
-      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
-
-      osc.start(now);
-      osc.stop(now + 0.3);
+      // Reset and play
+      this.crashSound.currentTime = 0;
+      this.crashSound.play().catch(e => {
+        console.warn("Crash sound play failed", e);
+      });
+      
     } catch (e) {
-      // Ignore audio errors
+      // Fallback or ignore
+      console.warn("Audio error", e);
     }
   }
 }
