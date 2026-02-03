@@ -1,0 +1,5 @@
+{
+  "name": "Flappy Bird",
+  "description": "A classic Flappy Bird clone with smooth physics and high performance.",
+  "requestFramePermissions": []
+}
