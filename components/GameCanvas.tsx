@@ -24,7 +24,7 @@ const GameCanvas: React.FC = () => {
 
   // Canvas Refs
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const requestRef = useRef<number>();
+  const requestRef = useRef<number>(0);
   const birdImageRef = useRef<HTMLImageElement | null>(null);
   const pipeImageRef = useRef<HTMLImageElement | null>(null);
   
@@ -36,9 +36,9 @@ const GameCanvas: React.FC = () => {
   
   // Logic Refs for loop stability
   const scoreRef = useRef(0);
-  const framesSinceSpawn = useRef(PIPE_SPAWN_RATE); // Start ready to spawn
+  const framesSinceSpawn = useRef(PIPE_SPAWN_RATE); 
 
-  // Handle Resize
+  // Handle Resize with Debounce/Update
   useEffect(() => {
     const handleResize = () => {
       setDimensions({ width: window.innerWidth, height: window.innerHeight });
@@ -47,18 +47,14 @@ const GameCanvas: React.FC = () => {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // Update refs when dimensions change to prevent glitches
   useEffect(() => {
-    // If bird is off screen due to resize, reset or clamp? 
-    // For now, we just let it be, but during Start screen, center it.
     if (gameState === GameState.START) {
       birdY.current = dimensions.height / 2;
     }
   }, [dimensions, gameState]);
 
-  // Load Images
+  // Load Images and Audio
   useEffect(() => {
-    // Load Bird
     const birdImg = new Image();
     birdImg.crossOrigin = "anonymous";
     birdImg.src = BIRD_IMAGE_URL;
@@ -66,19 +62,19 @@ const GameCanvas: React.FC = () => {
       birdImageRef.current = birdImg;
     };
 
-    // Load Pipe
     const pipeImg = new Image();
     pipeImg.crossOrigin = "anonymous";
     pipeImg.src = PIPE_IMAGE_URL;
     pipeImg.onload = () => {
       pipeImageRef.current = pipeImg;
     };
+
+    // Preload background music
+    audioController.preloadMusic(BACKGROUND_MUSIC_URL);
   }, []);
 
   const drawBird = (ctx: CanvasRenderingContext2D, y: number, velocity: number) => {
     ctx.save();
-    // Center bird horizontally based on screen width (e.g., 10% or fixed 50px)
-    // We'll keep it fixed at 50px from left for consistency
     const cx = 50 + BIRD_SIZE / 2;
     const cy = y + BIRD_SIZE / 2;
     
@@ -88,7 +84,20 @@ const GameCanvas: React.FC = () => {
     
     if (birdImageRef.current) {
         const visualSize = BIRD_SIZE * 1.2; 
+        
+        // Create circular clipping mask
+        ctx.beginPath();
+        ctx.arc(0, 0, visualSize / 2, 0, Math.PI * 2);
+        ctx.closePath();
+        ctx.clip();
+        
         ctx.drawImage(birdImageRef.current, -visualSize/2, -visualSize/2, visualSize, visualSize);
+        
+        // Optional: Add a slight border to make it pop against background
+        ctx.strokeStyle = 'white';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
     } else {
         ctx.fillStyle = '#4ade80';
         ctx.beginPath();
@@ -102,23 +111,55 @@ const GameCanvas: React.FC = () => {
   const drawPipe = (ctx: CanvasRenderingContext2D, pipe: PipeData, gameHeight: number) => {
     const x = pipe.x;
     const topH = pipe.topHeight;
-    // Use the dynamic gap stored in the pipe object
     const bottomY = topH + pipe.gap;
     const bottomH = gameHeight - bottomY;
 
     if (pipeImageRef.current) {
-      // Draw Top Pipe
-      // Flip vertically so the "top" of the image is at the pipe opening
+      const img = pipeImageRef.current;
+      
+      // Calculate scaled height to maintain aspect ratio
+      // This ensures the image isn't squashed horizontally
+      const scale = PIPE_WIDTH / img.width;
+      const tileHeight = img.height * scale;
+
+      // --- Draw Top Pipe ---
       ctx.save();
-      ctx.translate(x, topH); // Move to bottom of top pipe
-      ctx.scale(1, -1); // Flip vertically
-      // Draw from 0 to topH (which is now upwards because of flip)
-      ctx.drawImage(pipeImageRef.current, 0, 0, PIPE_WIDTH, topH);
+      // Translate to the bottom of the top pipe (the opening)
+      ctx.translate(x, topH);
+      // Flip vertically so we draw 'upwards' from the opening.
+      // This ensures the "cap" of the pipe (if at image y=0) is at the opening.
+      ctx.scale(1, -1);
+      
+      // Clip to the pipe's dimensions
+      ctx.beginPath();
+      ctx.rect(0, 0, PIPE_WIDTH, topH);
+      ctx.clip();
+
+      // Loop to tile (chain) the image
+      let currentY = 0;
+      while (currentY < topH) {
+        ctx.drawImage(img, 0, currentY, PIPE_WIDTH, tileHeight);
+        currentY += tileHeight;
+      }
       ctx.restore();
 
-      // Draw Bottom Pipe
-      // "Top" of the image is at the pipe opening
-      ctx.drawImage(pipeImageRef.current, x, bottomY, PIPE_WIDTH, bottomH);
+      // --- Draw Bottom Pipe ---
+      ctx.save();
+      // Translate to the top of the bottom pipe (the opening)
+      ctx.translate(x, bottomY);
+      
+      // Clip to the pipe's dimensions
+      ctx.beginPath();
+      ctx.rect(0, 0, PIPE_WIDTH, bottomH);
+      ctx.clip();
+
+      // Loop to tile (chain) the image downwards
+      currentY = 0;
+      while (currentY < bottomH) {
+        ctx.drawImage(img, 0, currentY, PIPE_WIDTH, tileHeight);
+        currentY += tileHeight;
+      }
+      ctx.restore();
       
     } else {
       // Fallback Rendering
@@ -148,7 +189,7 @@ const GameCanvas: React.FC = () => {
     pipes.current = [];
     frameCount.current = 0;
     scoreRef.current = 0;
-    framesSinceSpawn.current = PIPE_SPAWN_RATE; // Trigger immediate spawn
+    framesSinceSpawn.current = PIPE_SPAWN_RATE;
     setScore(0);
     setGameState(GameState.PLAYING);
   };
@@ -160,7 +201,7 @@ const GameCanvas: React.FC = () => {
     } else if (gameState === GameState.START) {
       startGame();
     }
-  }, [gameState, dimensions.height]); // Add dimensions dependency
+  }, [gameState, dimensions.height]);
 
   const triggerGameOver = useCallback((finalScore: number) => {
     setGameState(GameState.GAME_OVER);
@@ -179,10 +220,30 @@ const GameCanvas: React.FC = () => {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Use current dimensions from state (captured in closure)
+    // HIGH DPI SCALING
+    const dpr = window.devicePixelRatio || 1;
+    
+    const rect = canvas.getBoundingClientRect();
+    const desiredWidth = rect.width * dpr;
+    const desiredHeight = rect.height * dpr;
+
+    if (canvas.width !== desiredWidth || canvas.height !== desiredHeight) {
+        canvas.width = desiredWidth;
+        canvas.height = desiredHeight;
+        ctx.scale(dpr, dpr);
+    } else {
+        // Reset transform to identity * dpr for start of frame
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+
+    // Enable high quality image smoothing
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    
+    // Use logical dimensions for logic
     const { width, height } = dimensions;
 
-    // Clear Canvas
+    // Clear Logic Space
     ctx.clearRect(0, 0, width, height);
 
     if (gameState === GameState.PLAYING) {
@@ -192,29 +253,16 @@ const GameCanvas: React.FC = () => {
 
       const currentScore = scoreRef.current;
       
-      // --- DYNAMIC DIFFICULTY ---
-      // Start (Score 0): Speed 3.0, Gap 200, SpawnRate 120 (Very Easy)
-      // Mid (Score 20): Speed 4.6, Gap 160, SpawnRate ~95
-      // Hard (Score 50+): Speed 7.0, Gap 130, SpawnRate ~60 (Very Hard)
-      
-      // Speed increases: Base 3.0 + 0.08 per point. Cap at 7.0
       const currentSpeed = Math.min(PIPE_SPEED + (currentScore * 0.08), 7.0); 
-      
-      // Spawn Rate decreases: Base 120 - 1.2 per point. Floor at 60 frames.
       const currentSpawnRate = Math.max(PIPE_SPAWN_RATE - (currentScore * 1.2), 60);
 
       // Pipe Spawning
       if (framesSinceSpawn.current >= currentSpawnRate) {
         const minPipeHeight = 50;
-        const groundHeight = 48; // h-12 is 48px
+        const groundHeight = 48; 
         
-        // Calculate Gap for this specific pipe
-        // Gap shrinks: Base 200 - 1.4 per point. Floor at 130.
         const dynamicGap = Math.max(130, PIPE_GAP - (currentScore * 1.4));
-        
         const maxPipeHeight = height - dynamicGap - minPipeHeight - groundHeight;
-        
-        // Ensure we have valid spawn range
         const safeMax = Math.max(minPipeHeight + 10, maxPipeHeight);
         const randomHeight = Math.floor(Math.random() * (safeMax - minPipeHeight + 1)) + minPipeHeight;
         
@@ -235,7 +283,6 @@ const GameCanvas: React.FC = () => {
         const pipe = pipes.current[i];
         pipe.x -= currentSpeed;
 
-        // Collision Logic
         const hitBoxSize = BIRD_SIZE - 8;
         const birdLeft = 50 + 4;
         const birdRight = 50 + hitBoxSize;
@@ -246,13 +293,11 @@ const GameCanvas: React.FC = () => {
         const pipeRight = pipe.x + PIPE_WIDTH;
 
         if (birdRight > pipeLeft && birdLeft < pipeRight) {
-          // Use pipe.gap here instead of constant
           if (birdTop < pipe.topHeight || birdBottom > pipe.topHeight + pipe.gap) {
              triggerGameOver(scoreRef.current); 
           }
         }
 
-        // Score
         if (!pipe.passed && birdLeft > pipeRight) {
             pipe.passed = true;
             scoreRef.current += 1;
@@ -260,14 +305,11 @@ const GameCanvas: React.FC = () => {
             audioController.playScore();
         }
 
-        // Cleanup
         if (pipe.x + PIPE_WIDTH < -50) {
             pipes.current.splice(i, 1);
         }
       }
 
-      // Ground/Ceiling Collision
-      // Ground is h-12 (48px)
       const groundY = height - 48;
       if (birdY.current + BIRD_SIZE >= groundY || birdY.current <= 0) {
           triggerGameOver(scoreRef.current);
@@ -285,7 +327,7 @@ const GameCanvas: React.FC = () => {
     }
   }, [gameState, triggerGameOver, dimensions]); 
   
-  // Re-bind loop when state changes
+  // Re-bind loop
   useEffect(() => {
     if (gameState === GameState.PLAYING) {
       requestRef.current = requestAnimationFrame(loop);
@@ -321,10 +363,7 @@ const GameCanvas: React.FC = () => {
   return (
     <div className="relative w-full h-full bg-slate-900 select-none touch-none overflow-hidden">
       
-      {/* Game Container - Now Full Screen */}
-      <div 
-        className="relative w-full h-full bg-sky-300 overflow-hidden"
-      >
+      <div className="relative w-full h-full bg-sky-300 overflow-hidden">
         {/* Background Clouds */}
         <div className="absolute inset-0 opacity-40 pointer-events-none">
             <div className="absolute top-[10%] left-[5%] w-24 h-12 bg-white rounded-full blur-md"></div>
@@ -332,11 +371,10 @@ const GameCanvas: React.FC = () => {
             <div className="absolute bottom-[30%] left-[30%] w-48 h-20 bg-white rounded-full blur-xl"></div>
         </div>
 
-        {/* Canvas Layer */}
+        {/* Canvas Layer with explicit CSS dimensions for DPI scaling */}
         <canvas 
             ref={canvasRef}
-            width={dimensions.width}
-            height={dimensions.height}
+            style={{ width: '100%', height: '100%' }}
             className="absolute inset-0 z-20 block"
         />
 
@@ -372,7 +410,6 @@ const GameCanvas: React.FC = () => {
               >
                 <Play fill="currentColor" /> START
               </button>
-
             </div>
           </div>
         )}

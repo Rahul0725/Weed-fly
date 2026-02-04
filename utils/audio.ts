@@ -1,9 +1,11 @@
-import { GAME_OVER_SOUND_URL } from '../constants';
+import { GAME_OVER_SOUND_URL, GAME_OVER_SOUND_URL_2 } from '../constants';
 
 class AudioController {
   private ctx: AudioContext | null = null;
   private bgMusic: HTMLAudioElement | null = null;
   private crashSound: HTMLAudioElement | null = null;
+  private crashSound2: HTMLAudioElement | null = null;
+  private crashCount: number = 0;
 
   private getContext(): AudioContext {
     if (!this.ctx) {
@@ -21,12 +23,26 @@ class AudioController {
     }
   }
 
+  public preloadMusic(url: string) {
+    if (!this.bgMusic) {
+      this.bgMusic = new Audio(url);
+      this.bgMusic.loop = true;
+      this.bgMusic.volume = 0.4; // Background music slightly lower volume
+      this.bgMusic.preload = 'auto';
+      this.bgMusic.load();
+    } else if (this.bgMusic.src !== url) {
+      this.bgMusic.src = url;
+      this.bgMusic.load();
+    }
+  }
+
   public playMusic(url: string) {
     // Create audio element if it doesn't exist
     if (!this.bgMusic) {
       this.bgMusic = new Audio(url);
       this.bgMusic.loop = true;
-      this.bgMusic.volume = 0.4; // Background music slightly lower volume
+      this.bgMusic.volume = 0.4; 
+      this.bgMusic.preload = 'auto';
     } 
     // Update src if changed (though we typically use one track)
     else if (this.bgMusic.src !== url) {
@@ -35,9 +51,12 @@ class AudioController {
     
     // Play if paused
     if (this.bgMusic.paused) {
-      this.bgMusic.play().catch(e => {
-        console.warn("Background music autoplay prevented by browser policy", e);
-      });
+      const playPromise = this.bgMusic.play();
+      if (playPromise !== undefined) {
+        playPromise.catch(e => {
+          console.warn("Background music autoplay prevented or waiting for user interaction", e);
+        });
+      }
     }
   }
 
@@ -101,18 +120,32 @@ class AudioController {
   }
 
   public playCrash() {
+    this.crashCount++;
     try {
-      if (!this.crashSound) {
-        this.crashSound = new Audio(GAME_OVER_SOUND_URL);
-        // Pre-load logic not strictly needed for Audio element but good to have instance
-        this.crashSound.volume = 0.6;
+      // Check if it's an even numbered attempt (2nd, 4th, 6th...)
+      const isSecondAttempt = this.crashCount % 2 === 0;
+
+      if (isSecondAttempt) {
+        if (!this.crashSound2) {
+          this.crashSound2 = new Audio(GAME_OVER_SOUND_URL_2);
+          this.crashSound2.volume = 1.0; // Dialogue might need to be clearly heard
+          this.crashSound2.preload = 'auto';
+        }
+        this.crashSound2.currentTime = 0;
+        this.crashSound2.play().catch(e => {
+          console.warn("Crash sound 2 play failed", e);
+        });
+      } else {
+        if (!this.crashSound) {
+          this.crashSound = new Audio(GAME_OVER_SOUND_URL);
+          this.crashSound.volume = 0.6;
+          this.crashSound.preload = 'auto';
+        }
+        this.crashSound.currentTime = 0;
+        this.crashSound.play().catch(e => {
+          console.warn("Crash sound 1 play failed", e);
+        });
       }
-      
-      // Reset and play
-      this.crashSound.currentTime = 0;
-      this.crashSound.play().catch(e => {
-        console.warn("Crash sound play failed", e);
-      });
       
     } catch (e) {
       // Fallback or ignore
