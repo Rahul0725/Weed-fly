@@ -102,7 +102,8 @@ const GameCanvas: React.FC = () => {
   const drawPipe = (ctx: CanvasRenderingContext2D, pipe: PipeData, gameHeight: number) => {
     const x = pipe.x;
     const topH = pipe.topHeight;
-    const bottomY = topH + PIPE_GAP;
+    // Use the dynamic gap stored in the pipe object
+    const bottomY = topH + pipe.gap;
     const bottomH = gameHeight - bottomY;
 
     if (pipeImageRef.current) {
@@ -189,19 +190,29 @@ const GameCanvas: React.FC = () => {
       birdVelocity.current += GRAVITY;
       birdY.current += birdVelocity.current;
 
-      // Dynamic Difficulty
       const currentScore = scoreRef.current;
-      // Increase speed by 0.04 per point, capped at 7.0 (Base 3.5)
-      const currentSpeed = Math.min(PIPE_SPEED + (currentScore * 0.04), 7.0); 
-      // Decrease spawn rate by 0.8 per point, floor at 50 frames (Base 100)
-      const currentSpawnRate = Math.max(PIPE_SPAWN_RATE - (currentScore * 0.8), 50);
+      
+      // --- DYNAMIC DIFFICULTY ---
+      // Start (Score 0): Speed 3.0, Gap 200, SpawnRate 120 (Very Easy)
+      // Mid (Score 20): Speed 4.6, Gap 160, SpawnRate ~95
+      // Hard (Score 50+): Speed 7.0, Gap 130, SpawnRate ~60 (Very Hard)
+      
+      // Speed increases: Base 3.0 + 0.08 per point. Cap at 7.0
+      const currentSpeed = Math.min(PIPE_SPEED + (currentScore * 0.08), 7.0); 
+      
+      // Spawn Rate decreases: Base 120 - 1.2 per point. Floor at 60 frames.
+      const currentSpawnRate = Math.max(PIPE_SPAWN_RATE - (currentScore * 1.2), 60);
 
       // Pipe Spawning
-      // We check if it's time to spawn based on dynamic rate
       if (framesSinceSpawn.current >= currentSpawnRate) {
         const minPipeHeight = 50;
         const groundHeight = 48; // h-12 is 48px
-        const maxPipeHeight = height - PIPE_GAP - minPipeHeight - groundHeight;
+        
+        // Calculate Gap for this specific pipe
+        // Gap shrinks: Base 200 - 1.4 per point. Floor at 130.
+        const dynamicGap = Math.max(130, PIPE_GAP - (currentScore * 1.4));
+        
+        const maxPipeHeight = height - dynamicGap - minPipeHeight - groundHeight;
         
         // Ensure we have valid spawn range
         const safeMax = Math.max(minPipeHeight + 10, maxPipeHeight);
@@ -211,6 +222,7 @@ const GameCanvas: React.FC = () => {
           id: Date.now(),
           x: width,
           topHeight: randomHeight,
+          gap: dynamicGap,
           passed: false,
         });
         
@@ -234,7 +246,8 @@ const GameCanvas: React.FC = () => {
         const pipeRight = pipe.x + PIPE_WIDTH;
 
         if (birdRight > pipeLeft && birdLeft < pipeRight) {
-          if (birdTop < pipe.topHeight || birdBottom > pipe.topHeight + PIPE_GAP) {
+          // Use pipe.gap here instead of constant
+          if (birdTop < pipe.topHeight || birdBottom > pipe.topHeight + pipe.gap) {
              triggerGameOver(scoreRef.current); 
           }
         }
@@ -270,7 +283,7 @@ const GameCanvas: React.FC = () => {
     if (gameState === GameState.PLAYING) {
       requestRef.current = requestAnimationFrame(loop);
     }
-  }, [gameState, triggerGameOver, dimensions]); // score removed from dependencies
+  }, [gameState, triggerGameOver, dimensions]); 
   
   // Re-bind loop when state changes
   useEffect(() => {

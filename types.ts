@@ -2,6 +2,7 @@ export interface PipeData {
   id: number;
   x: number;
   topHeight: number;
+  gap: number;
   passed: boolean;
 }
 

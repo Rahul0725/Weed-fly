@@ -1,10 +1,10 @@
 export const GRAVITY = 0.6;
 export const JUMP_STRENGTH = -10; // Stronger jump for snappier response
-export const PIPE_SPEED = 3.5; // Slightly faster
-export const PIPE_WIDTH = 60; // Slightly wider for the joint visual
-export const PIPE_GAP = 160; // Slightly tighter gap
-export const PIPE_SPAWN_RATE = 100; // Frames between pipes
-export const BIRD_SIZE = 40; // Slightly larger for the leaf detail
+export const PIPE_SPEED = 3.0; // Slower start speed (was 3.5)
+export const PIPE_WIDTH = 60; 
+export const PIPE_GAP = 190; // Wider gap for easier start (was 160)
+export const PIPE_SPAWN_RATE = 120; // Slower spawn rate for easier start (was 100)
+export const BIRD_SIZE = 40; 
 export const GAME_HEIGHT = 600;
 export const GAME_WIDTH = 400;
 

@@ -1,5 +1,5 @@
 import React from 'react';
-import { PIPE_WIDTH, PIPE_GAP, GAME_HEIGHT } from '../constants';
+import { PIPE_WIDTH, GAME_HEIGHT } from '../constants';
 import { PipeData } from '../types';
 
 interface PipeProps {
@@ -7,7 +7,8 @@ interface PipeProps {
 }
 
 const Pipe: React.FC<PipeProps> = ({ pipe }) => {
-  const bottomPipeTop = pipe.topHeight + PIPE_GAP;
+  // Use the specific gap assigned to this pipe for dynamic difficulty
+  const bottomPipeTop = pipe.topHeight + pipe.gap;
   const bottomPipeHeight = GAME_HEIGHT - bottomPipeTop;
 
   return (
