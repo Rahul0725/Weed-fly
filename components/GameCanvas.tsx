@@ -40,11 +40,19 @@ const GameCanvas: React.FC = () => {
 
   // Handle Resize with Debounce/Update
   useEffect(() => {
+    // Fixed: Use ReturnType<typeof setTimeout> instead of NodeJS.Timeout to avoid type errors when @types/node is missing
+    let timeoutId: ReturnType<typeof setTimeout>;
     const handleResize = () => {
-      setDimensions({ width: window.innerWidth, height: window.innerHeight });
+      clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => {
+        setDimensions({ width: window.innerWidth, height: window.innerHeight });
+      }, 100);
     };
     window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      clearTimeout(timeoutId);
+    };
   }, []);
 
   useEffect(() => {
@@ -84,20 +92,7 @@ const GameCanvas: React.FC = () => {
     
     if (birdImageRef.current) {
         const visualSize = BIRD_SIZE * 1.2; 
-        
-        // Create circular clipping mask
-        ctx.beginPath();
-        ctx.arc(0, 0, visualSize / 2, 0, Math.PI * 2);
-        ctx.closePath();
-        ctx.clip();
-        
         ctx.drawImage(birdImageRef.current, -visualSize/2, -visualSize/2, visualSize, visualSize);
-        
-        // Optional: Add a slight border to make it pop against background
-        ctx.strokeStyle = 'white';
-        ctx.lineWidth = 2;
-        ctx.stroke();
-
     } else {
         ctx.fillStyle = '#4ade80';
         ctx.beginPath();
@@ -114,11 +109,10 @@ const GameCanvas: React.FC = () => {
     const bottomY = topH + pipe.gap;
     const bottomH = gameHeight - bottomY;
 
-    if (pipeImageRef.current) {
+    if (pipeImageRef.current && pipeImageRef.current.width > 0) {
       const img = pipeImageRef.current;
       
       // Calculate scaled height to maintain aspect ratio
-      // This ensures the image isn't squashed horizontally
       const scale = PIPE_WIDTH / img.width;
       const tileHeight = img.height * scale;
 
@@ -127,36 +121,41 @@ const GameCanvas: React.FC = () => {
       // Translate to the bottom of the top pipe (the opening)
       ctx.translate(x, topH);
       // Flip vertically so we draw 'upwards' from the opening.
-      // This ensures the "cap" of the pipe (if at image y=0) is at the opening.
       ctx.scale(1, -1);
       
-      // Clip to the pipe's dimensions
-      ctx.beginPath();
-      ctx.rect(0, 0, PIPE_WIDTH, topH);
-      ctx.clip();
-
-      // Loop to tile (chain) the image
+      // Optimized drawing loop without clipping
       let currentY = 0;
       while (currentY < topH) {
-        ctx.drawImage(img, 0, currentY, PIPE_WIDTH, tileHeight);
+        const remainingH = topH - currentY;
+        const drawH = Math.min(tileHeight, remainingH);
+        
+        // Calculate source height based on how much we need to draw
+        const sourceH = drawH / scale;
+
+        ctx.drawImage(
+          img, 
+          0, 0, img.width, sourceH, // Source
+          0, currentY, PIPE_WIDTH, drawH // Destination
+        );
         currentY += tileHeight;
       }
       ctx.restore();
 
       // --- Draw Bottom Pipe ---
       ctx.save();
-      // Translate to the top of the bottom pipe (the opening)
       ctx.translate(x, bottomY);
       
-      // Clip to the pipe's dimensions
-      ctx.beginPath();
-      ctx.rect(0, 0, PIPE_WIDTH, bottomH);
-      ctx.clip();
-
-      // Loop to tile (chain) the image downwards
       currentY = 0;
       while (currentY < bottomH) {
-        ctx.drawImage(img, 0, currentY, PIPE_WIDTH, tileHeight);
+        const remainingH = bottomH - currentY;
+        const drawH = Math.min(tileHeight, remainingH);
+        const sourceH = drawH / scale;
+
+        ctx.drawImage(
+          img,
+          0, 0, img.width, sourceH,
+          0, currentY, PIPE_WIDTH, drawH
+        );
         currentY += tileHeight;
       }
       ctx.restore();
@@ -217,32 +216,30 @@ const GameCanvas: React.FC = () => {
   const loop = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { alpha: true }); // optimize
     if (!ctx) return;
 
     // HIGH DPI SCALING
     const dpr = window.devicePixelRatio || 1;
-    
-    const rect = canvas.getBoundingClientRect();
-    const desiredWidth = rect.width * dpr;
-    const desiredHeight = rect.height * dpr;
+    const { width, height } = dimensions; // Use state dimensions, avoid getBoundingClientRect()
 
-    if (canvas.width !== desiredWidth || canvas.height !== desiredHeight) {
-        canvas.width = desiredWidth;
-        canvas.height = desiredHeight;
+    // Resize canvas only if dimensions mismatch significantly to avoid clearing
+    const targetWidth = Math.floor(width * dpr);
+    const targetHeight = Math.floor(height * dpr);
+
+    if (canvas.width !== targetWidth || canvas.height !== targetHeight) {
+        canvas.width = targetWidth;
+        canvas.height = targetHeight;
         ctx.scale(dpr, dpr);
     } else {
-        // Reset transform to identity * dpr for start of frame
+        // Just ensure identity transform + scale
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     }
 
-    // Enable high quality image smoothing
+    // Default image smoothing is usually 'low' (bilinear) which is fast.
+    // Explicitly setting 'high' is expensive.
     ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = 'high';
     
-    // Use logical dimensions for logic
-    const { width, height } = dimensions;
-
     // Clear Logic Space
     ctx.clearRect(0, 0, width, height);
 
@@ -371,7 +368,7 @@ const GameCanvas: React.FC = () => {
             <div className="absolute bottom-[30%] left-[30%] w-48 h-20 bg-white rounded-full blur-xl"></div>
         </div>
 
-        {/* Canvas Layer with explicit CSS dimensions for DPI scaling */}
+        {/* Canvas Layer */}
         <canvas 
             ref={canvasRef}
             style={{ width: '100%', height: '100%' }}
