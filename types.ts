@@ -4,6 +4,7 @@ export interface PipeData {
   topHeight: number;
   gap: number;
   passed: boolean;
+  imgIndex: number;
 }
 
 export interface GameStats {

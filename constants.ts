@@ -17,8 +17,10 @@ export enum GameState {
 // Custom Bird Image URL
 export const BIRD_IMAGE_URL = 'https://i.postimg.cc/W3pZrt95/Flag-of-Israel-svg.png';
 
-// Custom Pillar Image URL
-export const PIPE_IMAGE_URL = 'https://i.postimg.cc/jSFd96pH/IMG-20260203-150942.jpg';
+// Custom Pillar Image URLs
+export const PIPE_IMAGE_URLS = [
+  'https://i.postimg.cc/0jd7kM9v/Picsart-26-02-05-10-21-26-628.png'
+];
 
 // Background Music URL
 export const BACKGROUND_MUSIC_URL = 'https://github.com/Rahul0725/Sound-effects-gg/raw/refs/heads/main/Bangla%20funny%20video%20bangala%20gala%20gali%20dog%20and%20chita%F0%9F%A4%A3%F0%9F%A4%A3%F0%9F%A4%A3(MP3_160K).mp3';

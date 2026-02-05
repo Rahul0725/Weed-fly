@@ -9,7 +9,7 @@ import {
   PIPE_GAP, 
   GameState,
   BIRD_IMAGE_URL,
-  PIPE_IMAGE_URL,
+  PIPE_IMAGE_URLS,
   BACKGROUND_MUSIC_URL
 } from '../constants';
 import { PipeData } from '../types';
@@ -26,7 +26,7 @@ const GameCanvas: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const requestRef = useRef<number>(0);
   const birdImageRef = useRef<HTMLImageElement | null>(null);
-  const pipeImageRef = useRef<HTMLImageElement | null>(null);
+  const pipeImagesRef = useRef<HTMLImageElement[]>([]);
   
   // Game State Refs (Mutable for performance)
   const birdY = useRef(dimensions.height / 2);
@@ -40,7 +40,6 @@ const GameCanvas: React.FC = () => {
 
   // Handle Resize with Debounce/Update
   useEffect(() => {
-    // Fixed: Use ReturnType<typeof setTimeout> instead of NodeJS.Timeout to avoid type errors when @types/node is missing
     let timeoutId: ReturnType<typeof setTimeout>;
     const handleResize = () => {
       clearTimeout(timeoutId);
@@ -70,12 +69,13 @@ const GameCanvas: React.FC = () => {
       birdImageRef.current = birdImg;
     };
 
-    const pipeImg = new Image();
-    pipeImg.crossOrigin = "anonymous";
-    pipeImg.src = PIPE_IMAGE_URL;
-    pipeImg.onload = () => {
-      pipeImageRef.current = pipeImg;
-    };
+    // Load all pipe images
+    pipeImagesRef.current = PIPE_IMAGE_URLS.map(url => {
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        img.src = url;
+        return img;
+    });
 
     // Preload background music
     audioController.preloadMusic(BACKGROUND_MUSIC_URL);
@@ -109,56 +109,31 @@ const GameCanvas: React.FC = () => {
     const bottomY = topH + pipe.gap;
     const bottomH = gameHeight - bottomY;
 
-    if (pipeImageRef.current && pipeImageRef.current.width > 0) {
-      const img = pipeImageRef.current;
-      
-      // Calculate scaled height to maintain aspect ratio
-      const scale = PIPE_WIDTH / img.width;
-      const tileHeight = img.height * scale;
+    // Get the assigned image for this pipe, or fallback to the first one
+    const imgIndex = pipe.imgIndex ?? 0;
+    // Safety check for index bounds
+    const safeIndex = Math.max(0, Math.min(imgIndex, pipeImagesRef.current.length - 1));
+    const img = pipeImagesRef.current[safeIndex];
 
+    if (img && img.complete && img.naturalWidth > 0) {
       // --- Draw Top Pipe ---
       ctx.save();
       // Translate to the bottom of the top pipe (the opening)
       ctx.translate(x, topH);
       // Flip vertically so we draw 'upwards' from the opening.
+      // This ensures the "bottom" of the image (e.g. feet/base) is at the pipe opening.
       ctx.scale(1, -1);
       
-      // Optimized drawing loop without clipping
-      let currentY = 0;
-      while (currentY < topH) {
-        const remainingH = topH - currentY;
-        const drawH = Math.min(tileHeight, remainingH);
-        
-        // Calculate source height based on how much we need to draw
-        const sourceH = drawH / scale;
-
-        ctx.drawImage(
-          img, 
-          0, 0, img.width, sourceH, // Source
-          0, currentY, PIPE_WIDTH, drawH // Destination
-        );
-        currentY += tileHeight;
-      }
+      // Draw stretched image for top pipe
+      // We draw from 0 (opening) to topH (ceiling)
+      ctx.drawImage(img, 0, 0, PIPE_WIDTH, topH);
+      
       ctx.restore();
 
       // --- Draw Bottom Pipe ---
-      ctx.save();
-      ctx.translate(x, bottomY);
-      
-      currentY = 0;
-      while (currentY < bottomH) {
-        const remainingH = bottomH - currentY;
-        const drawH = Math.min(tileHeight, remainingH);
-        const sourceH = drawH / scale;
-
-        ctx.drawImage(
-          img,
-          0, 0, img.width, sourceH,
-          0, currentY, PIPE_WIDTH, drawH
-        );
-        currentY += tileHeight;
-      }
-      ctx.restore();
+      // Draw stretched image for bottom pipe
+      // We draw from bottomY (opening) to bottomH (height of pipe)
+      ctx.drawImage(img, x, bottomY, PIPE_WIDTH, bottomH);
       
     } else {
       // Fallback Rendering
@@ -216,14 +191,13 @@ const GameCanvas: React.FC = () => {
   const loop = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext('2d', { alpha: true }); // optimize
+    const ctx = canvas.getContext('2d', { alpha: true }); 
     if (!ctx) return;
 
     // HIGH DPI SCALING
     const dpr = window.devicePixelRatio || 1;
-    const { width, height } = dimensions; // Use state dimensions, avoid getBoundingClientRect()
+    const { width, height } = dimensions; 
 
-    // Resize canvas only if dimensions mismatch significantly to avoid clearing
     const targetWidth = Math.floor(width * dpr);
     const targetHeight = Math.floor(height * dpr);
 
@@ -232,12 +206,9 @@ const GameCanvas: React.FC = () => {
         canvas.height = targetHeight;
         ctx.scale(dpr, dpr);
     } else {
-        // Just ensure identity transform + scale
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     }
 
-    // Default image smoothing is usually 'low' (bilinear) which is fast.
-    // Explicitly setting 'high' is expensive.
     ctx.imageSmoothingEnabled = true;
     
     // Clear Logic Space
@@ -263,12 +234,16 @@ const GameCanvas: React.FC = () => {
         const safeMax = Math.max(minPipeHeight + 10, maxPipeHeight);
         const randomHeight = Math.floor(Math.random() * (safeMax - minPipeHeight + 1)) + minPipeHeight;
         
+        // Randomly select a texture index (now just 0, but logic remains safe)
+        const randomImgIndex = Math.floor(Math.random() * PIPE_IMAGE_URLS.length);
+
         pipes.current.push({
           id: Date.now(),
           x: width,
           topHeight: randomHeight,
           gap: dynamicGap,
           passed: false,
+          imgIndex: randomImgIndex
         });
         
         framesSinceSpawn.current = 0;
