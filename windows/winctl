@@ -1,0 +1,113 @@
+#!/usr/bin/env python3
+"""
+winctl: Master CLI Controller for Windows 10 Virtualized Environment
+Provides sub-millisecond execution, OCR clicking, hardware mouse/keys, screen capture, and video recording.
+"""
+
+import sys
+import os
+import time
+import argparse
+import subprocess
+from win_bridge import WinBridge
+from win_vision_agent import WinVisionAgent
+
+def main():
+    parser = argparse.ArgumentParser(description="Master CLI Controller for Windows 10 OS")
+    subparsers = parser.add_subparsers(dest="command", help="Available commands")
+
+    # Command: run (PowerShell)
+    p_run = subparsers.add_parser("run", help="Execute PowerShell script on Windows and return output")
+    p_run.add_argument("script", help="PowerShell script/command string")
+
+    # Command: click-text (OCR)
+    p_ct = subparsers.add_parser("click-text", help="Find text on screen using OCR and click it")
+    p_ct.add_argument("text", help="Text to find and click")
+    p_ct.add_argument("--exact", action="store_true", help="Match exact text")
+
+    # Command: click (Coordinates)
+    p_c = subparsers.add_parser("click", help="Click at exact (X, Y) pixel coordinates")
+    p_c.add_argument("x", type=int, help="X coordinate (0-1280)")
+    p_c.add_argument("y", type=int, help="Y coordinate (0-800)")
+    p_c.add_argument("--btn", type=int, default=1, help="Button (1=left, 4=right)")
+
+    # Command: drag
+    p_d = subparsers.add_parser("drag", help="Click and drag from (X1, Y1) to (X2, Y2)")
+    p_d.add_argument("x1", type=int)
+    p_d.add_argument("y1", type=int)
+    p_d.add_argument("x2", type=int)
+    p_d.add_argument("y2", type=int)
+
+    # Command: type
+    p_t = subparsers.add_parser("type", help="Type text into focused Windows window")
+    p_t.add_argument("text", help="Text string to type")
+
+    # Command: key
+    p_k = subparsers.add_parser("key", help="Send key combo (e.g. meta_l-r, ctrl-alt-del)")
+    p_k.add_argument("key", help="Key name or combo")
+
+    # Command: screen
+    p_s = subparsers.add_parser("screen", help="Capture live Windows screen")
+    p_s.add_argument("--out", default="/tmp/windows-storage/live_screen.png", help="Output PNG path")
+
+    # Command: ocr
+    p_o = subparsers.add_parser("ocr", help="Scan screen and print all visible text elements")
+
+    # Command: record
+    p_rec = subparsers.add_parser("record", help="Record video clip of the live Windows screen")
+    p_rec.add_argument("duration", type=int, default=5, help="Duration in seconds")
+    p_rec.add_argument("--out", default="/tmp/windows_recording.mp4", help="Output video file path")
+
+    args = parser.parse_args()
+
+    if args.command == "run":
+        out = WinBridge.run_powershell(args.script)
+        print(out)
+    elif args.command == "click-text":
+        res = WinVisionAgent.click_text(args.text, exact=args.exact)
+        if res:
+            print(f"Successfully clicked '{args.text}'")
+        else:
+            print(f"Failed to find '{args.text}' on screen.")
+            sys.exit(1)
+    elif args.command == "click":
+        WinBridge.click(args.x, args.y, button=args.btn)
+        print(f"Clicked ({args.x}, {args.y})")
+    elif args.command == "drag":
+        WinBridge.drag(args.x1, args.y1, args.x2, args.y2)
+        print(f"Dragged ({args.x1}, {args.y1}) -> ({args.x2}, {args.y2})")
+    elif args.command == "type":
+        WinBridge.type_text(args.text)
+        print(f"Typed: {args.text}")
+    elif args.command == "key":
+        WinBridge.send_key(args.key)
+        print(f"Sent key: {args.key}")
+    elif args.command == "screen":
+        path = WinBridge.capture_screen(args.out)
+        print(f"Screen captured: {path}")
+    elif args.command == "ocr":
+        elements = WinVisionAgent.find_all_text_elements()
+        for e in elements:
+            print(f"[{e['conf']}%] '{e['text']}' @ {e['center']} (box: {e['box']})")
+    elif args.command == "record":
+        print(f"Recording {args.duration}s video to {args.out}...")
+        frames = []
+        start = time.time()
+        while time.time() - start < args.duration:
+            fpath = f"/tmp/frame_{len(frames):04d}.ppm"
+            WinBridge._send_qemu(f"screendump {fpath}")
+            frames.append(fpath)
+            time.sleep(0.1)
+        # Encode to MP4 using ffmpeg
+        subprocess.run([
+            "ffmpeg", "-y", "-framerate", "10", "-i", "/tmp/frame_%04d.ppm",
+            "-c:v", "libx264", "-pix_fmt", "yuv420p", args.out
+        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        for f in frames:
+            if os.path.exists(f): os.remove(f)
+        print(f"Video saved successfully to: {args.out}")
+    else:
+        parser.print_help()
+
+if __name__ == "__main__":
+    main()

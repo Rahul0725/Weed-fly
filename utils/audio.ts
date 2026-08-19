@@ -1,157 +1,319 @@
-import { GAME_OVER_SOUND_URL, GAME_OVER_SOUND_URL_2 } from '../constants';
+import { SoundSettings } from '../types';
 
-class AudioController {
+class StudioAudioController {
   private ctx: AudioContext | null = null;
-  private bgMusic: HTMLAudioElement | null = null;
-  private crashSound: HTMLAudioElement | null = null;
-  private crashSound2: HTMLAudioElement | null = null;
-  private crashCount: number = 0;
+  private masterGain: GainNode | null = null;
+  private musicGain: GainNode | null = null;
+  private sfxGain: GainNode | null = null;
+  private filterNode: BiquadFilterNode | null = null;
 
-  private getContext(): AudioContext {
-    if (!this.ctx) {
-      // Cross-browser support
-      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-      this.ctx = new AudioContextClass();
-    }
-    return this.ctx;
+  // Stems
+  private bassGain: GainNode | null = null;
+  private arpGain: GainNode | null = null;
+  private chordGain: GainNode | null = null;
+  private leadGain: GainNode | null = null;
+
+  private isBgmPlaying: boolean = false;
+  private bgmInterval: ReturnType<typeof setInterval> | null = null;
+  private bgmStep: number = 0;
+
+  private settings: SoundSettings = {
+    masterVolume: 0.8,
+    musicVolume: 0.5,
+    sfxVolume: 0.8,
+    muted: false
+  };
+
+  private initAudio() {
+    if (this.ctx) return;
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioContextClass) return;
+
+    this.ctx = new AudioContextClass();
+
+    this.masterGain = this.ctx.createGain();
+    this.masterGain.gain.setValueAtTime(this.settings.muted ? 0 : this.settings.masterVolume, this.ctx.currentTime);
+
+    this.filterNode = this.ctx.createBiquadFilter();
+    this.filterNode.type = 'lowpass';
+    this.filterNode.frequency.setValueAtTime(20000, this.ctx.currentTime);
+
+    this.musicGain = this.ctx.createGain();
+    this.musicGain.gain.setValueAtTime(this.settings.musicVolume, this.ctx.currentTime);
+
+    this.sfxGain = this.ctx.createGain();
+    this.sfxGain.gain.setValueAtTime(this.settings.sfxVolume, this.ctx.currentTime);
+
+    // Dynamic Stem Buses
+    this.bassGain = this.ctx.createGain();
+    this.arpGain = this.ctx.createGain();
+    this.chordGain = this.ctx.createGain();
+    this.leadGain = this.ctx.createGain();
+
+    this.bassGain.gain.setValueAtTime(0.7, this.ctx.currentTime);
+    this.chordGain.gain.setValueAtTime(0.5, this.ctx.currentTime);
+    this.arpGain.gain.setValueAtTime(0.0, this.ctx.currentTime); // Unlocks at 2x combo
+    this.leadGain.gain.setValueAtTime(0.0, this.ctx.currentTime); // Unlocks at 4x combo
+
+    this.bassGain.connect(this.musicGain);
+    this.chordGain.connect(this.musicGain);
+    this.arpGain.connect(this.musicGain);
+    this.leadGain.connect(this.musicGain);
+
+    this.musicGain.connect(this.filterNode);
+    this.sfxGain.connect(this.filterNode);
+    this.filterNode.connect(this.masterGain);
+    this.masterGain.connect(this.ctx.destination);
   }
 
   public async resume() {
-    const ctx = this.getContext();
-    if (ctx.state === 'suspended') {
-      await ctx.resume();
-    }
-  }
-
-  public preloadMusic(url: string) {
-    if (!this.bgMusic) {
-      this.bgMusic = new Audio(url);
-      this.bgMusic.loop = true;
-      this.bgMusic.volume = 0.4; // Background music slightly lower volume
-      this.bgMusic.preload = 'auto';
-      this.bgMusic.load();
-    } else if (this.bgMusic.src !== url) {
-      this.bgMusic.src = url;
-      this.bgMusic.load();
-    }
-  }
-
-  public playMusic(url: string) {
-    // Create audio element if it doesn't exist
-    if (!this.bgMusic) {
-      this.bgMusic = new Audio(url);
-      this.bgMusic.loop = true;
-      this.bgMusic.volume = 0.4; 
-      this.bgMusic.preload = 'auto';
-    } 
-    // Update src if changed (though we typically use one track)
-    else if (this.bgMusic.src !== url) {
-       this.bgMusic.src = url;
-    }
-    
-    // Play if paused
-    if (this.bgMusic.paused) {
-      const playPromise = this.bgMusic.play();
-      if (playPromise !== undefined) {
-        playPromise.catch(e => {
-          console.warn("Background music autoplay prevented or waiting for user interaction", e);
-        });
+    try {
+      this.initAudio();
+      if (this.ctx && this.ctx.state === 'suspended') {
+        await this.ctx.resume();
       }
+    } catch (err) {
+      console.warn("Audio resume bypassed", err);
     }
   }
 
-  public stopMusic() {
-    if (this.bgMusic) {
-      this.bgMusic.pause();
-      this.bgMusic.currentTime = 0;
-    }
+  public setLowPass(cutoffHz: number = 20000, rampTime: number = 0.2) {
+    if (!this.filterNode || !this.ctx) return;
+    const now = this.ctx.currentTime;
+    this.filterNode.frequency.cancelScheduledValues(now);
+    this.filterNode.frequency.exponentialRampToValueAtTime(Math.max(100, cutoffHz), now + rampTime);
+  }
+
+  // Update dynamic stems based on active combo multiplier (1x to 5x)
+  public setComboMultiplier(multiplier: number) {
+    if (!this.arpGain || !this.leadGain || !this.ctx) return;
+    const now = this.ctx.currentTime;
+    const arpVol = multiplier >= 2 ? 0.6 : 0.0;
+    const leadVol = multiplier >= 4 ? 0.7 : 0.0;
+    this.arpGain.gain.linearRampToValueAtTime(arpVol, now + 0.3);
+    this.leadGain.gain.linearRampToValueAtTime(leadVol, now + 0.3);
+  }
+
+  public setSettings(newSettings: Partial<SoundSettings>) {
+    this.settings = { ...this.settings, ...newSettings };
+    if (!this.ctx || !this.masterGain || !this.musicGain || !this.sfxGain) return;
+    const now = this.ctx.currentTime;
+
+    const effectiveMaster = this.settings.muted ? 0 : this.settings.masterVolume;
+    this.masterGain.gain.setValueAtTime(effectiveMaster, now);
+    this.musicGain.gain.setValueAtTime(this.settings.musicVolume, now);
+    this.sfxGain.gain.setValueAtTime(this.settings.sfxVolume, now);
+  }
+
+  public getSettings(): SoundSettings {
+    return { ...this.settings };
   }
 
   public playJump() {
+    this.initAudio();
+    if (!this.ctx || !this.sfxGain) return;
     try {
-      const ctx = this.getContext();
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
+      const now = this.ctx.currentTime;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(160, now);
+      osc.frequency.exponentialRampToValueAtTime(480, now + 0.12);
+
+      gain.gain.setValueAtTime(0.3, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.14);
 
       osc.connect(gain);
-      gain.connect(ctx.destination);
-
-      // Simple "wing flap" sound (rising sine)
-      osc.type = 'sine';
-      const now = ctx.currentTime;
-      osc.frequency.setValueAtTime(150, now);
-      osc.frequency.linearRampToValueAtTime(350, now + 0.1);
-
-      gain.gain.setValueAtTime(0.2, now);
-      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+      gain.connect(this.sfxGain);
 
       osc.start(now);
-      osc.stop(now + 0.15);
-    } catch (e) {
-      // Ignore audio errors
-    }
+      osc.stop(now + 0.14);
+    } catch (e) {}
   }
 
-  public playScore() {
+  public playScore(comboCount: number = 1) {
+    this.initAudio();
+    if (!this.ctx || !this.sfxGain) return;
     try {
-      const ctx = this.getContext();
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
+      const now = this.ctx.currentTime;
+      const rootFreq = 523.25;
+      const pentatonic = [1.0, 1.125, 1.25, 1.5, 1.667, 2.0, 2.25];
+      const scaleIdx = (comboCount - 1) % pentatonic.length;
+      const freq1 = rootFreq * pentatonic[scaleIdx];
+      const freq2 = freq1 * 1.5;
+
+      const osc1 = this.ctx.createOscillator();
+      const osc2 = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+
+      osc1.type = 'sine';
+      osc2.type = 'triangle';
+
+      osc1.frequency.setValueAtTime(freq1, now);
+      osc2.frequency.setValueAtTime(freq2, now + 0.04);
+
+      gain.gain.setValueAtTime(0.2, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
+
+      osc1.connect(gain);
+      osc2.connect(gain);
+      gain.connect(this.sfxGain);
+
+      osc1.start(now);
+      osc2.start(now + 0.04);
+      osc1.stop(now + 0.22);
+      osc2.stop(now + 0.22);
+    } catch (e) {}
+  }
+
+  public playGraze() {
+    this.initAudio();
+    if (!this.ctx || !this.sfxGain) return;
+    try {
+      const now = this.ctx.currentTime;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(1200, now);
+      osc.frequency.exponentialRampToValueAtTime(2400, now + 0.08);
+
+      gain.gain.setValueAtTime(0.12, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.09);
 
       osc.connect(gain);
-      gain.connect(ctx.destination);
-
-      // "Coin" sound (high pitch ping)
-      osc.type = 'square';
-      const now = ctx.currentTime;
-      
-      // Little arpeggio effect
-      osc.frequency.setValueAtTime(1000, now);
-      osc.frequency.setValueAtTime(1500, now + 0.05);
-
-      gain.gain.setValueAtTime(0.08, now);
-      gain.gain.linearRampToValueAtTime(0.01, now + 0.1);
+      gain.connect(this.sfxGain);
 
       osc.start(now);
-      osc.stop(now + 0.1);
-    } catch (e) {
-      // Ignore audio errors
-    }
+      osc.stop(now + 0.09);
+    } catch (e) {}
+  }
+
+  public playPowerUpCollect() {
+    this.initAudio();
+    if (!this.ctx || !this.sfxGain) return;
+    try {
+      const now = this.ctx.currentTime;
+      const notes = [440, 554.37, 659.25, 880];
+      notes.forEach((freq, idx) => {
+        const osc = this.ctx!.createOscillator();
+        const gain = this.ctx!.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, now + idx * 0.04);
+        gain.gain.setValueAtTime(0.15, now + idx * 0.04);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.04 + 0.25);
+        osc.connect(gain);
+        gain.connect(this.sfxGain!);
+        osc.start(now + idx * 0.04);
+        osc.stop(now + idx * 0.04 + 0.25);
+      });
+    } catch (e) {}
+  }
+
+  public playShieldBreak() {
+    this.initAudio();
+    if (!this.ctx || !this.sfxGain) return;
+    try {
+      const now = this.ctx.currentTime;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(800, now);
+      osc.frequency.exponentialRampToValueAtTime(100, now + 0.3);
+
+      gain.gain.setValueAtTime(0.35, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+
+      osc.connect(gain);
+      gain.connect(this.sfxGain);
+
+      osc.start(now);
+      osc.stop(now + 0.3);
+    } catch (e) {}
   }
 
   public playCrash() {
-    this.crashCount++;
+    this.initAudio();
+    if (!this.ctx || !this.sfxGain) return;
     try {
-      // Check if it's an even numbered attempt (2nd, 4th, 6th...)
-      const isSecondAttempt = this.crashCount % 2 === 0;
-
-      if (isSecondAttempt) {
-        if (!this.crashSound2) {
-          this.crashSound2 = new Audio(GAME_OVER_SOUND_URL_2);
-          this.crashSound2.volume = 1.0; // Dialogue might need to be clearly heard
-          this.crashSound2.preload = 'auto';
-        }
-        this.crashSound2.currentTime = 0;
-        this.crashSound2.play().catch(e => {
-          console.warn("Crash sound 2 play failed", e);
-        });
-      } else {
-        if (!this.crashSound) {
-          this.crashSound = new Audio(GAME_OVER_SOUND_URL);
-          this.crashSound.volume = 0.6;
-          this.crashSound.preload = 'auto';
-        }
-        this.crashSound.currentTime = 0;
-        this.crashSound.play().catch(e => {
-          console.warn("Crash sound 1 play failed", e);
-        });
+      const now = this.ctx.currentTime;
+      const bufferSize = this.ctx.sampleRate * 0.35;
+      const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) {
+        data[i] = Math.random() * 2 - 1;
       }
-      
-    } catch (e) {
-      // Fallback or ignore
-      console.warn("Audio error", e);
+
+      const noise = this.ctx.createBufferSource();
+      noise.buffer = buffer;
+
+      const filter = this.ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(600, now);
+      filter.frequency.linearRampToValueAtTime(40, now + 0.35);
+
+      const gain = this.ctx.createGain();
+      gain.gain.setValueAtTime(0.4, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.35);
+
+      noise.connect(filter);
+      filter.connect(gain);
+      gain.connect(this.sfxGain);
+
+      noise.start(now);
+    } catch (e) {}
+  }
+
+  // 5-Stem Adaptive Dynamic Procedural Synthesizer
+  public startMusic() {
+    this.initAudio();
+    if (this.isBgmPlaying || !this.ctx || !this.musicGain) return;
+    this.isBgmPlaying = true;
+    this.bgmStep = 0;
+
+    const chords = [
+      [261.63, 329.63, 392.00], // C
+      [220.00, 261.63, 329.63], // Am
+      [174.61, 220.00, 261.63], // F
+      [196.00, 246.94, 293.66], // G
+    ];
+
+    const playChordStep = () => {
+      if (!this.isBgmPlaying || !this.ctx || !this.chordGain) return;
+      const now = this.ctx.currentTime;
+      const chord = chords[this.bgmStep % chords.length];
+      this.bgmStep++;
+
+      chord.forEach((freq, i) => {
+        const osc = this.ctx!.createOscillator();
+        const gain = this.ctx!.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq * (i === 0 ? 0.5 : 1.0), now);
+
+        gain.gain.setValueAtTime(0.04, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 1.8);
+
+        osc.connect(gain);
+        gain.connect(this.chordGain!);
+
+        osc.start(now);
+        osc.stop(now + 1.8);
+      });
+    };
+
+    playChordStep();
+    this.bgmInterval = setInterval(playChordStep, 1600);
+  }
+
+  public stopMusic() {
+    this.isBgmPlaying = false;
+    if (this.bgmInterval) {
+      clearInterval(this.bgmInterval);
+      this.bgmInterval = null;
     }
   }
 }
 
-export const audioController = new AudioController();
+export const audioController = new StudioAudioController();
